@@ -1,0 +1,159 @@
+from datetime import date, time
+from decimal import Decimal
+
+from sqlalchemy import (
+    Boolean,
+    Date,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db import Base
+
+
+class Term(Base):
+    __tablename__ = "terms"
+
+    term_code: Mapped[str] = mapped_column(String(10), primary_key=True)
+    term_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Explicit chronological order (year * 10 + season rank), since term_code
+    # sorts wrong as a string: "FA2023" < "SP2024" is false lexicographically.
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+
+
+class Program(Base):
+    __tablename__ = "programs"
+
+    program_code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    program_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    total_credits_required: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class RequirementCategory(Base):
+    __tablename__ = "requirement_categories"
+
+    # Programme-scoped: the same course can satisfy a category in one
+    # programme and not another, because categories themselves belong to a
+    # single programme (category_id values are already programme-prefixed,
+    # e.g. BE-CENG-CORE vs BE-MECH-CORE).
+    category_id: Mapped[str] = mapped_column(String(30), primary_key=True)
+    program_code: Mapped[str] = mapped_column(
+        ForeignKey("programs.program_code"), nullable=False
+    )
+    category_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    credits_required: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class Course(Base):
+    __tablename__ = "courses"
+
+    course_code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CategoryCourse(Base):
+    """Junction: which courses count toward which programme-scoped category."""
+
+    __tablename__ = "category_courses"
+
+    category_id: Mapped[str] = mapped_column(
+        ForeignKey("requirement_categories.category_id"), primary_key=True
+    )
+    course_code: Mapped[str] = mapped_column(
+        ForeignKey("courses.course_code"), primary_key=True
+    )
+
+
+class CoursePrerequisite(Base):
+    """Junction: one row per required prerequisite.
+
+    Multiple rows for the same course_code are AND'd together (all are
+    required) simply by each being its own row — a caller must find every
+    row for a course_code satisfied, not just one, so the "all required"
+    rule falls out of reading the whole row set rather than needing an
+    explicit AND/OR flag.
+    """
+
+    __tablename__ = "course_prerequisites"
+
+    course_code: Mapped[str] = mapped_column(
+        ForeignKey("courses.course_code"), primary_key=True
+    )
+    prerequisite_course_code: Mapped[str] = mapped_column(
+        ForeignKey("courses.course_code"), primary_key=True
+    )
+
+
+class Student(Base):
+    __tablename__ = "students"
+
+    student_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    first_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    email: Mapped[str] = mapped_column(String(200), nullable=False)
+    program_code: Mapped[str] = mapped_column(
+        ForeignKey("programs.program_code"), nullable=False
+    )
+    entry_term: Mapped[str] = mapped_column(ForeignKey("terms.term_code"), nullable=False)
+    # Not a FK to terms: several students' expected graduation terms (e.g.
+    # SP2027, SP2030) fall beyond the terms currently in the dataset.
+    expected_graduation_term: Mapped[str] = mapped_column(String(10), nullable=False)
+    academic_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    advisor_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    scenario_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Enrollment(Base):
+    __tablename__ = "enrollments"
+
+    student_id: Mapped[str] = mapped_column(
+        ForeignKey("students.student_id"), primary_key=True
+    )
+    term_code: Mapped[str] = mapped_column(ForeignKey("terms.term_code"), primary_key=True)
+    course_code: Mapped[str] = mapped_column(
+        ForeignKey("courses.course_code"), primary_key=True
+    )
+    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    grade: Mapped[str | None] = mapped_column(
+        ForeignKey("grading_scale.grade"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class GradingScale(Base):
+    __tablename__ = "grading_scale"
+
+    grade: Mapped[str] = mapped_column(String(5), primary_key=True)
+    grade_points: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), nullable=True)
+    earns_credit: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    included_in_gpa: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
+class ClassSchedule(Base):
+    __tablename__ = "class_schedule"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    term_code: Mapped[str] = mapped_column(ForeignKey("terms.term_code"), nullable=False)
+    course_code: Mapped[str] = mapped_column(
+        ForeignKey("courses.course_code"), nullable=False
+    )
+    days: Mapped[str] = mapped_column(String(30), nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    room: Mapped[str] = mapped_column(String(20), nullable=False)
+    instructor: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("term_code", "course_code", name="uq_class_schedule_term_course"),
+    )
