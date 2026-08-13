@@ -1,10 +1,17 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.api.auth import router as auth_router
+from app.api.courses import router as courses_router
+from app.api.me import router as me_router
 from app.db import engine
 from app.redis_client import redis
 
 app = FastAPI(title="University Assistant API")
+
+app.include_router(auth_router)
+app.include_router(me_router)
+app.include_router(courses_router)
 
 
 @app.get("/health")

@@ -11,6 +11,7 @@ dependencies = [
     "pandas>=3.0.5",
     "pydantic-ai>=2.29.0",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.13.0",
     "redis>=8.1.0",
     "sqlalchemy[asyncio]>=2.0",
     "uvicorn[standard]>=0.52.2",
@@ -18,5 +19,15 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# The SQLAlchemy async engine is a module-level singleton created once at
+# import time; per-test event loops (pytest-asyncio's default) would bind
+# its connections to a loop that no longer matches on the next test.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
