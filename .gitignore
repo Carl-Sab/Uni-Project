@@ -1,4 +1,4 @@
-.env
+l dene kella .env
 .venv/
 __pycache__/
 *.pyc
