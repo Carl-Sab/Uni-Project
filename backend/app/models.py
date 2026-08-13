@@ -192,3 +192,63 @@ class DocChunk(Base):
     doc_type: Mapped[str] = mapped_column(String(20), nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
     tsv: Mapped[str] = mapped_column(TSVECTOR, nullable=False)
+
+
+class AssistantConfig(Base):
+    """Single-row table (id is always 1) - an admin edit here is picked up
+    by the very next chat message, since the system prompt and model are
+    assembled fresh from this row on every request rather than cached at
+    startup.
+    """
+
+    __tablename__ = "assistant_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    persona: Mapped[str] = mapped_column(Text, nullable=False)
+    model_provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # "brief" | "detailed"
+    response_length: Mapped[str] = mapped_column(String(20), nullable=False)
+    temperature: Mapped[Decimal] = mapped_column(Numeric(2, 1), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Appointment(Base):
+    __tablename__ = "appointments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[str] = mapped_column(
+        ForeignKey("students.student_id"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    preferred_time: Mapped[str] = mapped_column(String(200), nullable=False)
+    # "pending" | "approved" | "declined" - the agent only ever creates
+    # "pending" rows; POST /api/me/appointments/{id}/approve is the only
+    # thing that can move a row to "approved" (human-in-the-loop booking).
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[str] = mapped_column(
+        ForeignKey("students.student_id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    # "user" | "assistant"
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

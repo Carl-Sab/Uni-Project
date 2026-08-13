@@ -7,7 +7,8 @@ import from here — there is no second copy of the GPA or dedup logic.
 Handbook: data/Eurisko_University_Student_Handbook_2026-2027.pdf
 """
 
-from dataclasses import dataclass
+from datetime import time
+from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, Decimal
 
 from sqlalchemy import select
@@ -326,3 +327,134 @@ async def check_course_eligibility(
     prereq_map = await get_prereq_map(session)
     c_minus = await get_c_minus_points(session)
     return check_eligibility(course_code, prereq_map, best_by_course, c_minus)
+
+
+@dataclass(frozen=True)
+class ScheduleItem:
+    course_code: str
+    title: str
+    credits: int
+    days: str
+    start_time: time
+    end_time: time
+    room: str
+    instructor: str
+
+
+async def get_schedule_items(session: AsyncSession, student_id: str) -> list[ScheduleItem]:
+    """Current-term (max sort_order in terms) classes the student is
+    enrolled in, joined against class_schedule for meeting details. The one
+    implementation used by both GET /api/me/schedule and the
+    get_my_schedule agent tool.
+    """
+    current_term = await get_current_term_code(session)
+    rows = (
+        await session.execute(
+            select(
+                ClassSchedule.course_code,
+                Course.title,
+                Course.credits,
+                ClassSchedule.days,
+                ClassSchedule.start_time,
+                ClassSchedule.end_time,
+                ClassSchedule.room,
+                ClassSchedule.instructor,
+            )
+            .join(Course, Course.course_code == ClassSchedule.course_code)
+            .join(
+                Enrollment,
+                (Enrollment.course_code == ClassSchedule.course_code)
+                & (Enrollment.term_code == ClassSchedule.term_code),
+            )
+            .where(
+                Enrollment.student_id == student_id,
+                ClassSchedule.term_code == current_term,
+            )
+            .order_by(ClassSchedule.start_time)
+        )
+    ).all()
+    return [
+        ScheduleItem(
+            course_code=r.course_code,
+            title=r.title,
+            credits=r.credits,
+            days=r.days,
+            start_time=r.start_time,
+            end_time=r.end_time,
+            room=r.room,
+            instructor=r.instructor,
+        )
+        for r in rows
+    ]
+
+
+@dataclass(frozen=True)
+class CourseHistoryEntry:
+    course_code: str
+    title: str
+    credits: int
+    grade: str | None
+    status: str
+
+
+@dataclass
+class TermCourses:
+    term_code: str
+    term_name: str
+    term_gpa: Decimal | None
+    courses: list[CourseHistoryEntry] = field(default_factory=list)
+
+
+async def get_courses_by_term(session: AsyncSession, student_id: str) -> list[TermCourses]:
+    """Every enrollment (completed and in-progress), grouped by term, with a
+    per-term GPA. The one implementation used by both GET /api/me/courses
+    and the get_my_courses agent tool.
+    """
+    rows = (
+        await session.execute(
+            select(
+                Enrollment.term_code,
+                Term.term_name,
+                Term.sort_order,
+                Enrollment.course_code,
+                Course.title,
+                Enrollment.credits,
+                Enrollment.grade,
+                Enrollment.status,
+                GradingScale.grade_points,
+                GradingScale.earns_credit,
+                GradingScale.included_in_gpa,
+            )
+            .join(Term, Term.term_code == Enrollment.term_code)
+            .join(Course, Course.course_code == Enrollment.course_code)
+            .join(GradingScale, GradingScale.grade == Enrollment.grade, isouter=True)
+            .where(Enrollment.student_id == student_id)
+            .order_by(Term.sort_order, Enrollment.course_code)
+        )
+    ).all()
+
+    terms: dict[str, TermCourses] = {}
+    term_attempt_rows: dict[str, list[tuple]] = {}
+    for r in rows:
+        if r.term_code not in terms:
+            terms[r.term_code] = TermCourses(term_code=r.term_code, term_name=r.term_name, term_gpa=None)
+            term_attempt_rows[r.term_code] = []
+        terms[r.term_code].courses.append(
+            CourseHistoryEntry(
+                course_code=r.course_code,
+                title=r.title,
+                credits=r.credits,
+                grade=r.grade,
+                status=r.status,
+            )
+        )
+        if r.status == "Completed":
+            term_attempt_rows[r.term_code].append(
+                (r.course_code, r.credits, r.grade, r.grade_points, r.earns_credit, r.included_in_gpa)
+            )
+
+    for term_code, term_courses in terms.items():
+        attempts = [row_to_attempt(row) for row in term_attempt_rows[term_code]]
+        term_courses.term_gpa = compute_gpa(attempts)
+
+    return list(terms.values())

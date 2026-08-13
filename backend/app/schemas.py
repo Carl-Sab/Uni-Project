@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import datetime, time
 from decimal import Decimal
 
 from pydantic import BaseModel
@@ -93,3 +93,28 @@ class CatalogueCourse(BaseModel):
     credits: int
     description: str
     prerequisites: list[str]
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: int | None = None
+
+
+class ChatMessageResponse(BaseModel):
+    role: str
+    content: str
+    created_at: datetime
+
+
+class ChatSessionSummary(BaseModel):
+    id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class AppointmentApprovalResponse(BaseModel):
+    id: int
+    status: str
+    reason: str
+    preferred_time: str

@@ -4,12 +4,11 @@ there is no /api/students/{id}/... route anywhere in this codebase.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_student
 from app.db import get_db
-from app.models import ClassSchedule, Course, Enrollment, GradingScale, Program, Student, Term
+from app.models import Course, Program, Student
 from app.schemas import (
     CategoryProgressResponse,
     CourseHistoryEntry,
@@ -26,8 +25,8 @@ from app.services.academic import (
     compute_gpa,
     compute_total_credits_earned,
     get_best_attempts,
-    get_current_term_code,
-    row_to_attempt,
+    get_courses_by_term,
+    get_schedule_items,
 )
 
 router = APIRouter(prefix="/api/me", tags=["me"])
@@ -72,103 +71,24 @@ async def get_profile(
 async def get_schedule(
     student_id: str = Depends(get_current_student), session: AsyncSession = Depends(get_db)
 ) -> list[ScheduleItem]:
-    current_term = await get_current_term_code(session)
-
-    rows = (
-        await session.execute(
-            select(
-                ClassSchedule.course_code,
-                Course.title,
-                Course.credits,
-                ClassSchedule.days,
-                ClassSchedule.start_time,
-                ClassSchedule.end_time,
-                ClassSchedule.room,
-                ClassSchedule.instructor,
-            )
-            .join(Course, Course.course_code == ClassSchedule.course_code)
-            .join(
-                Enrollment,
-                (Enrollment.course_code == ClassSchedule.course_code)
-                & (Enrollment.term_code == ClassSchedule.term_code),
-            )
-            .where(
-                Enrollment.student_id == student_id,
-                ClassSchedule.term_code == current_term,
-            )
-            .order_by(ClassSchedule.start_time)
-        )
-    ).all()
-
-    return [
-        ScheduleItem(
-            course_code=r.course_code,
-            title=r.title,
-            credits=r.credits,
-            days=r.days,
-            start_time=r.start_time,
-            end_time=r.end_time,
-            room=r.room,
-            instructor=r.instructor,
-        )
-        for r in rows
-    ]
+    items = await get_schedule_items(session, student_id)
+    return [ScheduleItem(**vars(item)) for item in items]
 
 
 @router.get("/courses", response_model=list[TermHistory])
 async def get_courses(
     student_id: str = Depends(get_current_student), session: AsyncSession = Depends(get_db)
 ) -> list[TermHistory]:
-    rows = (
-        await session.execute(
-            select(
-                Enrollment.term_code,
-                Term.term_name,
-                Term.sort_order,
-                Enrollment.course_code,
-                Course.title,
-                Enrollment.credits,
-                Enrollment.grade,
-                Enrollment.status,
-                GradingScale.grade_points,
-                GradingScale.earns_credit,
-                GradingScale.included_in_gpa,
-            )
-            .join(Term, Term.term_code == Enrollment.term_code)
-            .join(Course, Course.course_code == Enrollment.course_code)
-            .join(GradingScale, GradingScale.grade == Enrollment.grade, isouter=True)
-            .where(Enrollment.student_id == student_id)
-            .order_by(Term.sort_order, Enrollment.course_code)
+    terms = await get_courses_by_term(session, student_id)
+    return [
+        TermHistory(
+            term_code=t.term_code,
+            term_name=t.term_name,
+            term_gpa=t.term_gpa,
+            courses=[CourseHistoryEntry(**vars(c)) for c in t.courses],
         )
-    ).all()
-
-    terms: dict[str, TermHistory] = {}
-    term_attempt_rows: dict[str, list[tuple]] = {}
-    for r in rows:
-        if r.term_code not in terms:
-            terms[r.term_code] = TermHistory(
-                term_code=r.term_code, term_name=r.term_name, term_gpa=None, courses=[]
-            )
-            term_attempt_rows[r.term_code] = []
-        terms[r.term_code].courses.append(
-            CourseHistoryEntry(
-                course_code=r.course_code,
-                title=r.title,
-                credits=r.credits,
-                grade=r.grade,
-                status=r.status,
-            )
-        )
-        if r.status == "Completed":
-            term_attempt_rows[r.term_code].append(
-                (r.course_code, r.credits, r.grade, r.grade_points, r.earns_credit, r.included_in_gpa)
-            )
-
-    for term_code, term_history in terms.items():
-        attempts = [row_to_attempt(row) for row in term_attempt_rows[term_code]]
-        term_history.term_gpa = compute_gpa(attempts)
-
-    return list(terms.values())
+        for t in terms
+    ]
 
 
 @router.get("/degree-progress", response_model=list[CategoryProgressResponse])

@@ -18,6 +18,7 @@ no separate chunk cleanup needed.
 
 import asyncio
 import hashlib
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,8 +28,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import async_session
 from app.models import DocChunk, Document
 from app.services.chunking import chunk_units
+from app.services.concatenation_check import check_chunks_for_concatenation
 from app.services.embeddings import embed_texts
 from app.services.pdf_parsing import parse_catalogue, parse_handbook
+
+logger = logging.getLogger(__name__)
 
 PARSERS = {
     "handbook": parse_handbook,
@@ -67,6 +71,22 @@ async def _replace_chunks(session: AsyncSession, document_id: int, doc_type: str
     parser = PARSERS[doc_type]
     units = parser(path)
     chunks = chunk_units(units, doc_type)
+
+    # Surface a word-joining regression here, at ingestion, rather than
+    # letting it reach a chat answer and its citations. This never blocks
+    # ingestion - it's a heuristic with a known false-positive rate (real
+    # compound words like "outstanding" get flagged too) - just logged
+    # loudly enough that a real regression (e.g. "maynot", "youmay") stands
+    # out against the noise.
+    warnings = check_chunks_for_concatenation([c.content for c in chunks])
+    for w in warnings:
+        logger.warning(
+            "possible missing-space concatenation in %s (%s): %r  context: %r",
+            path,
+            w.kind,
+            w.token,
+            w.context,
+        )
 
     embeddings = await embed_texts([c.content for c in chunks])
 
