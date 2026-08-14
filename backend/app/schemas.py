@@ -118,3 +118,11 @@ class AppointmentApprovalResponse(BaseModel):
     status: str
     reason: str
     preferred_time: str
+
+
+class AppointmentResponse(BaseModel):
+    id: int
+    status: str
+    reason: str
+    preferred_time: str
+    created_at: datetime

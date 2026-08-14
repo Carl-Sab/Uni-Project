@@ -39,7 +39,16 @@ async def create_appointment_proposal(
         updated_at=now,
     )
     session.add(appointment)
-    await session.flush()
+    # Committed immediately, not left flushed-but-pending on the shared
+    # request-scoped session: the chat request's own final commit doesn't
+    # happen until the whole agent run (every tool call, then the full
+    # streamed answer) finishes without error, and this row must survive
+    # regardless of what happens later in that same turn - the frontend
+    # renders an approval card off this id/data the moment the tool
+    # returns, so it must already be durable by then. (Observed in testing:
+    # without this, the id returned to the client sometimes matched no row
+    # at all by the time the approval request came in.)
+    await session.commit()
     return AppointmentProposal(
         id=appointment.id,
         student_id=appointment.student_id,
@@ -47,6 +56,16 @@ async def create_appointment_proposal(
         preferred_time=appointment.preferred_time,
         status=appointment.status,
     )
+
+
+async def list_appointments(session: AsyncSession, student_id: str) -> list[Appointment]:
+    return (
+        await session.execute(
+            select(Appointment)
+            .where(Appointment.student_id == student_id)
+            .order_by(Appointment.created_at.desc())
+        )
+    ).scalars().all()
 
 
 async def approve_appointment(

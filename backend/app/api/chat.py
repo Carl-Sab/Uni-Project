@@ -25,11 +25,12 @@ from app.db import async_session, get_db
 from app.models import AssistantConfig
 from app.schemas import (
     AppointmentApprovalResponse,
+    AppointmentResponse,
     ChatMessageResponse,
     ChatRequest,
     ChatSessionSummary,
 )
-from app.services.appointments import approve_appointment
+from app.services.appointments import approve_appointment, list_appointments
 from app.services.chat import (
     get_or_create_session,
     get_recent_messages,
@@ -112,9 +113,14 @@ async def chat(
                             "data": json.dumps({"tool": event.part.tool_name, "args": event.part.args_as_dict()}),
                         }
                     elif isinstance(event, FunctionToolResultEvent):
+                        # Tool return values are already JSON-serializable
+                        # dicts/lists (see app/agent.py's _jsonable helper).
+                        # The frontend needs the actual content - not just
+                        # the tool name - to render e.g. an appointment
+                        # proposal's id/reason/time as an approval card.
                         yield {
                             "event": "tool_result",
-                            "data": json.dumps({"tool": event.part.tool_name}),
+                            "data": json.dumps({"tool": event.part.tool_name, "content": event.part.content}),
                         }
                     elif isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
                         # A new text part's initial content arrives here,
@@ -139,7 +145,14 @@ async def chat(
                 "data": json.dumps({"session_id": chat_session.id}),
             }
 
-    return EventSourceResponse(event_stream())
+    # ping=2: the tool-call + LLM-thinking phase before the first
+    # text_delta can easily take 5-10s with zero bytes sent otherwise -
+    # long enough to trip Node/Vite dev server's default 5s keep-alive
+    # socket timeout in front of this (observed in testing: the browser's
+    # fetch was silently aborted mid-stream on every request that took
+    # longer than ~5s to produce a first byte). A ping every 2s keeps the
+    # connection visibly alive well within that window.
+    return EventSourceResponse(event_stream(), ping=2)
 
 
 @router.get("/api/me/chats", response_model=list[ChatSessionSummary])
@@ -161,6 +174,20 @@ async def get_chat_messages(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     return [
         ChatMessageResponse(role=m.role, content=m.content, created_at=m.created_at) for m in messages
+    ]
+
+
+@router.get("/api/me/appointments", response_model=list[AppointmentResponse])
+async def get_appointments(
+    student_id: str = Depends(get_current_student), session: AsyncSession = Depends(get_db)
+) -> list[AppointmentResponse]:
+    appointments = await list_appointments(session, student_id)
+    return [
+        AppointmentResponse(
+            id=a.id, status=a.status, reason=a.reason, preferred_time=a.preferred_time,
+            created_at=a.created_at,
+        )
+        for a in appointments
     ]
 
 

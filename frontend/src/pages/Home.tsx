@@ -1,3 +1,8 @@
+import { Navigate } from "react-router-dom";
+import { useAuth } from "../lib/AuthContext";
+
 export default function Home() {
-  return <h1 className="text-3xl font-semibold p-8">Home</h1>
+  const { studentId, loading } = useAuth();
+  if (loading) return null;
+  return <Navigate to={studentId ? "/portal" : "/login"} replace />;
 }
