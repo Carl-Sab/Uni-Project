@@ -7,8 +7,9 @@ import from here — there is no second copy of the GPA or dedup logic.
 Handbook: data/Eurisko_University_Student_Handbook_2026-2027.pdf
 """
 
+import json
 from datetime import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from decimal import ROUND_DOWN, Decimal
 
 from sqlalchemy import select
@@ -25,6 +26,16 @@ from app.models import (
     Student,
     Term,
 )
+from app.redis_client import redis
+
+PROGRESS_CACHE_TTL_SECONDS = 60 * 60  # 1h - degree progress changes only on an
+# enrollment write (grade posted, course added/dropped), never within an hour
+# of its own accord, so an hour of staleness is a deliberate trade of
+# freshness for load off compute_category_progress's several joins.
+
+
+def _progress_cache_key(student_id: str) -> str:
+    return f"progress:{student_id}"
 
 
 @dataclass(frozen=True)
@@ -317,6 +328,28 @@ async def compute_category_progress(
             )
         )
     return result
+
+
+async def get_cached_category_progress(
+    session: AsyncSession, student: Student
+) -> list[CategoryProgress]:
+    """Cache-aside wrapper around compute_category_progress, keyed per
+    student. Invalidate via invalidate_progress_cache on any write to that
+    student's enrollments (see app/api/admin.py) - never left to expire on
+    its own for a student whose data just changed.
+    """
+    key = _progress_cache_key(student.student_id)
+    cached = await redis.get(key)
+    if cached is not None:
+        return [CategoryProgress(**c) for c in json.loads(cached)]
+
+    categories = await compute_category_progress(session, student)
+    await redis.set(key, json.dumps([asdict(c) for c in categories]), ex=PROGRESS_CACHE_TTL_SECONDS)
+    return categories
+
+
+async def invalidate_progress_cache(student_id: str) -> None:
+    await redis.delete(_progress_cache_key(student_id))
 
 
 async def check_course_eligibility(

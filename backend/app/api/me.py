@@ -21,10 +21,10 @@ from app.schemas import (
 )
 from app.services.academic import (
     check_course_eligibility,
-    compute_category_progress,
     compute_gpa,
     compute_total_credits_earned,
     get_best_attempts,
+    get_cached_category_progress,
     get_courses_by_term,
     get_schedule_items,
 )
@@ -96,7 +96,7 @@ async def get_degree_progress(
     student_id: str = Depends(get_current_student), session: AsyncSession = Depends(get_db)
 ) -> list[CategoryProgressResponse]:
     student = await _get_student(session, student_id)
-    categories = await compute_category_progress(session, student)
+    categories = await get_cached_category_progress(session, student)
 
     return [
         CategoryProgressResponse(

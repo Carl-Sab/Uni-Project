@@ -33,6 +33,7 @@ services:
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv
+      - ./data:/data:ro
     ports:
       - "8000:8000"
     depends_on:

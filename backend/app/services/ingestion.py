@@ -36,6 +36,7 @@ from app.services.chunking import chunk_units
 from app.services.concatenation_check import check_chunks_for_concatenation
 from app.services.embeddings import embed_texts
 from app.services.pdf_parsing import parse_catalogue, parse_handbook
+from app.services.retrieval import flush_retrieval_cache
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,11 @@ async def ingest_document(filename: str, path: str, doc_type: str) -> int:
             doc.chunk_count = chunk_count
             doc.indexed_at = datetime.now(timezone.utc)
 
+    # Covers both upload and re-index (reindex_document calls this same
+    # function) - the chunk set just changed, so every cached retrieval
+    # result is potentially stale.
+    await flush_retrieval_cache()
+
     return document_id
 
 
@@ -172,6 +178,7 @@ async def delete_document(document_id: int) -> None:
         upload_path = upload_path_for(filename)
         if upload_path.exists():
             upload_path.unlink()
+        await flush_retrieval_cache()
 
 
 def upload_path_for(filename: str) -> Path:

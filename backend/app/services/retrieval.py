@@ -23,17 +23,47 @@ paraphrase/semantic recall from vector search, without having to guess in
 advance which kind of query is coming in.
 """
 
-from dataclasses import dataclass
+import hashlib
+import json
+from dataclasses import asdict, dataclass
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.redis_client import redis
 from app.services.embeddings import embed_text
 
 VECTOR_TOP_K = 20
 FTS_TOP_K = 20
 RRF_K = 60
 FINAL_TOP_K = 5
+
+RETRIEVAL_CACHE_TTL_SECONDS = 60 * 60 * 24  # 24h - retrieval results depend
+# only on the indexed documents, not on anything that changes more often; the
+# whole retr:* namespace is flushed on upload/reindex/delete (see
+# app/services/ingestion.py) rather than relied on to expire.
+RETRIEVAL_CACHE_PREFIX = "retr:"
+
+
+def _retrieval_cache_key(query: str) -> str:
+    normalised = query.strip().lower()
+    digest = hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+    return f"{RETRIEVAL_CACHE_PREFIX}{digest}"
+
+
+async def flush_retrieval_cache() -> None:
+    """Whole-namespace flush, called on any document upload, re-index, or
+    delete (see app/services/ingestion.py) - a per-query invalidation isn't
+    possible since we don't know in advance which cached queries' answers a
+    changed document affects.
+    """
+    cursor = 0
+    while True:
+        cursor, keys = await redis.scan(cursor, match=f"{RETRIEVAL_CACHE_PREFIX}*", count=500)
+        if keys:
+            await redis.delete(*keys)
+        if cursor == 0:
+            break
 
 
 @dataclass(frozen=True)
@@ -82,6 +112,19 @@ def _vector_literal(embedding: list[float]) -> str:
 
 
 async def hybrid_search(session: AsyncSession, query: str, top_k: int = FINAL_TOP_K) -> list[RetrievalResult]:
+    cache_key = _retrieval_cache_key(query)
+    cached = await redis.get(cache_key)
+    if cached is not None:
+        return [RetrievalResult(**r) for r in json.loads(cached)][:top_k]
+
+    results = await _hybrid_search_uncached(session, query, top_k)
+    await redis.set(cache_key, json.dumps([asdict(r) for r in results]), ex=RETRIEVAL_CACHE_TTL_SECONDS)
+    return results
+
+
+async def _hybrid_search_uncached(
+    session: AsyncSession, query: str, top_k: int = FINAL_TOP_K
+) -> list[RetrievalResult]:
     query_embedding = await embed_text(query)
 
     vector_rows = (

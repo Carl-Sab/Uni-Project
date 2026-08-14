@@ -44,10 +44,10 @@ from app.schemas import (
     TermHistory,
 )
 from app.services.academic import (
-    compute_category_progress,
     compute_gpa,
     compute_total_credits_earned,
     get_best_attempts,
+    get_cached_category_progress,
     get_courses_by_term,
 )
 from app.services.ingestion import (
@@ -248,7 +248,7 @@ async def get_student_detail(
     total_credits = compute_total_credits_earned(best_attempts)
 
     terms = await get_courses_by_term(session, student_id)
-    categories = await compute_category_progress(session, student)
+    categories = await get_cached_category_progress(session, student)
 
     return AdminStudentDetail(
         profile=ProfileResponse(
