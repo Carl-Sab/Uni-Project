@@ -6,6 +6,7 @@ import { MotionConfig } from 'framer-motion'
 import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './lib/AuthContext'
+import { AdminAuthProvider } from './lib/AdminAuthContext'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,9 +22,11 @@ createRoot(document.getElementById('root')!).render(
     <MotionConfig reducedMotion="user">
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
+          <AdminAuthProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </AdminAuthProvider>
         </AuthProvider>
       </QueryClientProvider>
     </MotionConfig>

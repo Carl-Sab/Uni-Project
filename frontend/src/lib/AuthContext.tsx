@@ -27,7 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    onUnauthorized(() => {
+    const unsubscribe = onUnauthorized(() => {
       setToken(null);
       setStudentId(null);
       sessionStorage.removeItem(STORAGE_KEY);
@@ -36,12 +36,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const remembered = sessionStorage.getItem(STORAGE_KEY);
     if (!remembered) {
       setLoading(false);
-      return;
+      return unsubscribe;
     }
     doLogin(remembered)
       .then(() => setStudentId(remembered))
       .catch(() => sessionStorage.removeItem(STORAGE_KEY))
       .finally(() => setLoading(false));
+
+    return unsubscribe;
   }, []);
 
   async function login(id: string) {

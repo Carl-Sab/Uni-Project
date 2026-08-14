@@ -22,6 +22,11 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Where admin-uploaded PDFs land, named "{document_id}_{original filename}"
+# so a re-index can find the file again from the documents row alone -
+# nothing else needs to remember where an upload was written.
+UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,18 +49,22 @@ def _checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-async def _get_or_create_document(session: AsyncSession, filename: str, checksum: str) -> Document:
+async def _get_or_create_document(
+    session: AsyncSession, filename: str, doc_type: str, checksum: str
+) -> Document:
     existing = (
         await session.execute(select(Document).where(Document.filename == filename))
     ).scalar_one_or_none()
     if existing is not None:
         existing.checksum = checksum
+        existing.doc_type = doc_type
         existing.status = "pending"
         existing.uploaded_at = datetime.now(timezone.utc)
         return existing
 
     doc = Document(
         filename=filename,
+        doc_type=doc_type,
         uploaded_at=datetime.now(timezone.utc),
         indexed_at=None,
         status="pending",
@@ -119,7 +128,7 @@ async def ingest_document(filename: str, path: str, doc_type: str) -> int:
 
     async with async_session() as session:
         async with session.begin():
-            doc = await _get_or_create_document(session, filename, checksum)
+            doc = await _get_or_create_document(session, filename, doc_type, checksum)
             document_id = doc.id
             doc.status = "indexing"
 
@@ -155,5 +164,42 @@ async def delete_document(document_id: int) -> None:
     async with async_session() as session:
         async with session.begin():
             doc = await session.get(Document, document_id)
+            filename = doc.filename if doc is not None else None
             if doc is not None:
                 await session.delete(doc)  # cascades to doc_chunks in the DB
+
+    if filename is not None:
+        upload_path = upload_path_for(filename)
+        if upload_path.exists():
+            upload_path.unlink()
+
+
+def upload_path_for(filename: str) -> Path:
+    # Keyed by filename, not document_id: the document row's id doesn't
+    # exist yet at the moment a fresh upload is first written to disk (the
+    # row and the file are created in that order), and ingestion's own
+    # find-or-create-by-filename dedup (_get_or_create_document) already
+    # treats filename as the unique key, so reusing it here avoids a
+    # chicken-and-egg id dependency for no benefit.
+    return UPLOADS_DIR / filename
+
+
+async def reindex_document(document_id: int) -> None:
+    """Re-run the pipeline for a document already on disk under
+    UPLOADS_DIR, using its previously recorded doc_type.
+    """
+    async with async_session() as session:
+        doc = await session.get(Document, document_id)
+        if doc is None:
+            raise ValueError(f"No document with id {document_id}")
+        filename, doc_type = doc.filename, doc.doc_type
+
+    path = upload_path_for(filename)
+    if not path.exists():
+        raise FileNotFoundError(f"Uploaded file for document {document_id} not found at {path}")
+
+    await ingest_document(filename, str(path), doc_type)
+
+
+def start_reindex(document_id: int) -> "asyncio.Task[None]":
+    return asyncio.create_task(reindex_document(document_id))

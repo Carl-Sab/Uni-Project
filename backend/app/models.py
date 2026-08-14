@@ -169,6 +169,11 @@ class Document(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    # "handbook" | "catalogue" - which parser (app.services.pdf_parsing) to
+    # use, both at first ingest and on re-index. Admin-uploaded documents
+    # aren't one of two hardcoded files like the seed script's, so this has
+    # to be persisted rather than known by the caller ahead of time.
+    doc_type: Mapped[str] = mapped_column(String(20), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # "pending" | "indexing" | "indexed" | "failed" - polled by the admin

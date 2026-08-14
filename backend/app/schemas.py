@@ -126,3 +126,85 @@ class AppointmentResponse(BaseModel):
     reason: str
     preferred_time: str
     created_at: datetime
+
+
+# --- Admin ------------------------------------------------------------------
+
+
+class AdminStatsResponse(BaseModel):
+    student_count: int
+    course_count: int
+    enrollment_count: int
+    indexed_document_count: int
+    total_chunk_count: int
+    last_ingested_at: datetime | None
+
+
+class AdminDocumentResponse(BaseModel):
+    id: int
+    filename: str
+    doc_type: str
+    uploaded_at: datetime
+    indexed_at: datetime | None
+    status: str
+    chunk_count: int
+
+
+class AdminStudentSummary(BaseModel):
+    student_id: str
+    first_name: str
+    last_name: str
+    program_code: str
+    program_name: str
+    academic_status: str
+    cumulative_gpa: Decimal | None
+    total_credits_earned: int
+
+
+class AdminStudentDetail(BaseModel):
+    profile: ProfileResponse
+    terms: list[TermHistory]
+    degree_progress: list[CategoryProgressResponse]
+
+
+class AdminCourseResponse(BaseModel):
+    course_code: str
+    title: str
+    credits: int
+    prerequisites: list[str]
+    categories: list[str]
+
+
+class AdminEnrollmentResponse(BaseModel):
+    student_id: str
+    student_name: str
+    term_code: str
+    course_code: str
+    course_title: str
+    credits: int
+    grade: str | None
+    status: str
+
+
+class AdminEnrollmentPage(BaseModel):
+    items: list[AdminEnrollmentResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class AssistantConfigResponse(BaseModel):
+    persona: str
+    model_provider: str
+    model_name: str
+    response_length: str
+    temperature: Decimal
+    updated_at: datetime
+
+
+class AssistantConfigUpdate(BaseModel):
+    persona: str
+    model_provider: str
+    model_name: str
+    response_length: str
+    temperature: Decimal

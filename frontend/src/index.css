@@ -28,6 +28,20 @@
   --color-amber-500: #c8790a;
   --color-amber-100: #fbe8cc;
 
+  /* Admin accent — slate/steel, deliberately distinct from the student
+     portal's indigo so which side you're on is unmistakable at a glance. */
+  --color-steel-50: #f4f6f8;
+  --color-steel-100: #e7ebef;
+  --color-steel-200: #cdd6df;
+  --color-steel-300: #a7b4c2;
+  --color-steel-400: #7c8ea0;
+  --color-steel-500: #5c7086;
+  --color-steel-600: #45596e;
+  --color-steel-700: #37485a;
+  --color-steel-800: #2b3846;
+  --color-steel-900: #212b36;
+  --color-steel-950: #141b23;
+
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
